@@ -1,0 +1,42 @@
+# Category configuration for dev-tracker
+# Each category contains a list of regex patterns to match
+
+categories:
+  - name: "Development"
+    patterns:
+      - field: "process_name"
+        regex: "^(code|vim|nvim|emacs|sublime|atom|pycharm|idea|eclipse)$"
+      - field: "window_title"
+        regex: "\\.(py|js|java|cpp|c|go|rs|rb|php|html|css)\\b"
+  
+  - name: "Terminal"
+    patterns:
+      - field: "process_name"
+        regex: "^(gnome-terminal|konsole|xterm|alacritty|kitty|terminator)$"
+  
+  - name: "Browser"
+    patterns:
+      - field: "process_name"
+        regex: "^(firefox|chrome|chromium|brave|opera|vivaldi)$"
+  
+  - name: "Documentation"
+    patterns:
+      - field: "window_title"
+        regex: "(documentation|docs|manual|wiki|stackoverflow|github)"
+  
+  - name: "Communication"
+    patterns:
+      - field: "process_name"
+        regex: "^(slack|discord|teams|telegram|signal|thunderbird)$"
+  
+  - name: "Multimedia"
+    patterns:
+      - field: "process_name"
+        regex: "^(vlc|mpv|spotify|rhythmbox|audacity)$"
+  
+  - name: "Office"
+    patterns:
+      - field: "process_name"
+        regex: "^(libreoffice|soffice|abiword|gnumeric|evince|okular)$"
+      - field: "window_title"
+        regex: "\\.(doc|docx|xls|xlsx|ppt|pptx|pdf)\\b"
