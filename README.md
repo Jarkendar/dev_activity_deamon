@@ -1,126 +1,122 @@
 # Dev-Tracker
 
-Lekki daemon do śledzenia aktywności deweloperskiej z naciskiem na prywatność.
+A lightweight daemon for tracking developer activity with a focus on privacy.
 
-## Architektura koncepcyjna
-
+## Conceptual Architecture
 ```
 [Python Daemon]
     │
-    ├── Window title poller (co 5s)
+    ├── Window title poller (every 5s)
     ├── Active process tracker
     └── Idle detector (XScreenSaver API)
          │
          ▼
 [SQLite local database]
          │
-         ▼ (tygodniowy eksport JSON przez HTTP POST)
+         ▼ (weekly JSON export via HTTP POST)
 [n8n flow]
-    ├── Agregacja + podsumowanie
-    └── Wysyłka HTML email → Gmail
+    ├── Aggregation + summary
+    └── HTML email → Gmail
 ```
 
-## Faza 1 - Podstawowa funkcjonalność ✅
+## Phase 1 - Core Functionality ✅
 
-### Funkcje
-- ✅ Śledzenie aktywnego okna (tytuł + nazwa procesu)
-- ✅ Wykrywanie bezczynności (2 minuty bez aktywności)
-- ✅ Automatyczna kategoryzacja na podstawie reguł regex
-- ✅ Zapis sesji do SQLite
-- ✅ Polling co 5 sekund
-- ✅ Privacy-first: tylko tytuł okna i nazwa procesu, bez zawartości
+### Features
+- ✅ Active window tracking (title + process name)
+- ✅ Idle detection (2 minutes of inactivity)
+- ✅ Automatic categorization based on regex rules
+- ✅ Session storage in SQLite
+- ✅ Polling every 5 seconds
+- ✅ Privacy-first: only window title and process name, never content
 
-### Wymagania
+### Requirements
 - Python 3.11+
-- Linux z X11
-- `xdotool` (do pobierania informacji o oknach)
-- XScreenSaver (do wykrywania bezczynności)
+- Linux with X11
+- `xdotool` (for reading window information)
+- XScreenSaver (for idle detection)
 
-### Instalacja
-
+### Installation
 ```bash
-# Zainstaluj zależności systemowe
+# Install system dependencies
 sudo apt-get install xdotool libxss-dev
 
-# Zainstaluj zależności Python
+# Install Python dependencies
 pip install -r requirements.txt
 ```
 
-### Użycie
+### Usage
 
-#### Uruchomienie ręczne
-
+#### Manual start
 ```bash
-# Uruchom trackera
+# Start the tracker
 python -m daemon.main
 
-# Zatrzymaj: Ctrl+C
+# Stop: Ctrl+C
 ```
 
-#### Uruchomienie jako usługa systemd (zalecane)
-
+#### Run as systemd service (recommended)
 ```bash
-# Skopiuj plik usługi do katalogu użytkownika
+# Copy the service file to the user directory
 mkdir -p ~/.config/systemd/user
 cp systemd/dev-tracker.service ~/.config/systemd/user/
 
-# Włącz automatyczne uruchamianie przy logowaniu
+# Enable autostart on login
 systemctl --user enable dev-tracker
 
-# Uruchom usługę teraz
+# Start the service now
 systemctl --user start dev-tracker
 
-# Sprawdź status
+# Check status
 systemctl --user status dev-tracker
 
-# Zobacz logi
+# View logs
 journalctl --user -u dev-tracker -f
 
-# Zatrzymaj usługę
+# Stop the service
 systemctl --user stop dev-tracker
 
-# Wyłącz automatyczne uruchamianie
+# Disable autostart
 systemctl --user disable dev-tracker
 ```
 
-**Uwaga:** Upewnij się, że ścieżka w pliku `systemd/dev-tracker.service` wskazuje na właściwą lokalizację projektu (domyślnie `~/dev-tracker`). Jeśli projekt znajduje się w innym miejscu, edytuj `WorkingDirectory` i `ExecStart` w pliku usługi.
+**Note:** Make sure the path in `systemd/dev-tracker.service` points to the correct project location (default `~/dev-tracker`). If the project is located elsewhere, edit `WorkingDirectory` and `ExecStart` in the service file.
 
-### Konfiguracja
+### Configuration
 
-Edytuj `config/categories.yaml` aby dostosować reguły kategoryzacji.
+Edit `config/categories.yaml` to customize categorization rules.
 
-### Struktura bazy danych
+### Database Structure
 
-Tabela `sessions`:
-- `id` - ID sesji
-- `window_title` - Tytuł okna
-- `process_name` - Nazwa procesu
-- `category` - Kategoria (z reguł regex)
-- `start_time` - Czas rozpoczęcia
-- `end_time` - Czas zakończenia
-- `duration_seconds` - Czas trwania w sekundach
-- `is_idle` - Czy zakończono z powodu bezczynności
+Table `sessions`:
+- `id` - Session ID
+- `window_title` - Window title
+- `process_name` - Process name
+- `category` - Category (from regex rules)
+- `start_time` - Session start time
+- `end_time` - Session end time
+- `duration_seconds` - Duration in seconds
+- `is_idle` - Whether session ended due to idle
 
-### Prywatność
+### Privacy
 
-Dev-tracker **NIE** zapisuje:
-- Zawartości okien
-- Naciśnięć klawiszy
-- Zrzutów ekranu
-- Danych osobowych
+Dev-tracker does **NOT** store:
+- Window contents
+- Keystrokes
+- Screenshots
+- Personal data
 
-Zapisuje **TYLKO**:
-- Tytuł okna
-- Nazwę procesu
-- Czasy rozpoczęcia/zakończenia sesji
+It stores **ONLY**:
+- Window title
+- Process name
+- Session start/end times
 
 ## Roadmap
 
-### Faza 2 (planowana)
-- Eksport danych do JSON
-- Integracja z n8n (HTTP POST)
-- Agregacja tygodniowa
+### Phase 2 (planned)
+- Data export to JSON
+- Integration with n8n (HTTP POST)
+- Weekly aggregation
 
-### Faza 3 (planowana)
-- Generowanie raportów HTML
-- Wysyłka emaili przez n8n
+### Phase 3 (planned)
+- HTML report generation
+- Email sending via n8n
