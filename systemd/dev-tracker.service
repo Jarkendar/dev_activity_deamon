@@ -1,0 +1,13 @@
+[Unit]
+Description=Dev-Tracker Activity Monitor
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev-tracker
+ExecStart=%h/dev-tracker/.venv/bin/python -m daemon.main
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

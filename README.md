@@ -48,12 +48,42 @@ pip install -r requirements.txt
 
 ### Użycie
 
+#### Uruchomienie ręczne
+
 ```bash
 # Uruchom trackera
 python -m daemon.main
 
 # Zatrzymaj: Ctrl+C
 ```
+
+#### Uruchomienie jako usługa systemd (zalecane)
+
+```bash
+# Skopiuj plik usługi do katalogu użytkownika
+mkdir -p ~/.config/systemd/user
+cp systemd/dev-tracker.service ~/.config/systemd/user/
+
+# Włącz automatyczne uruchamianie przy logowaniu
+systemctl --user enable dev-tracker
+
+# Uruchom usługę teraz
+systemctl --user start dev-tracker
+
+# Sprawdź status
+systemctl --user status dev-tracker
+
+# Zobacz logi
+journalctl --user -u dev-tracker -f
+
+# Zatrzymaj usługę
+systemctl --user stop dev-tracker
+
+# Wyłącz automatyczne uruchamianie
+systemctl --user disable dev-tracker
+```
+
+**Uwaga:** Upewnij się, że ścieżka w pliku `systemd/dev-tracker.service` wskazuje na właściwą lokalizację projektu (domyślnie `~/dev-tracker`). Jeśli projekt znajduje się w innym miejscu, edytuj `WorkingDirectory` i `ExecStart` w pliku usługi.
 
 ### Konfiguracja
 
