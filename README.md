@@ -13,10 +13,11 @@ A lightweight daemon for tracking developer activity with a focus on privacy.
          ▼
 [SQLite local database]
          │
-         ▼ (weekly JSON export via HTTP POST)
+         ▼ (on daemon start — unsynced sessions via HTTP POST)
 [n8n flow]
-    ├── Aggregation + summary
-    └── HTML email → Gmail
+    ├── Split sessions array
+    ├── Insert into Data Tables (dev_activity_daemon)
+    └── Weekly HTML report → Gmail (planned)
 ```
 
 ## Phase 1 - Core Functionality ✅
@@ -41,15 +42,14 @@ A lightweight daemon for tracking developer activity with a focus on privacy.
 sudo apt-get install xdotool libxss-dev
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip install -r daemon/requirements.txt
 ```
 
 ### Usage
 
 #### Manual start
 ```bash
-# Start the tracker
-python -m daemon.main
+./run_time_tracker.sh
 
 # Stop: Ctrl+C
 ```
@@ -85,6 +85,13 @@ systemctl --user disable dev-tracker
 
 Edit `config/categories.yaml` to customize categorization rules.
 
+Edit `config/config.yaml` to set your n8n webhook URL:
+```yaml
+n8n_webhook_url: "https://your-n8n-instance/webhook/..."
+```
+
+> `config/config.yaml` is excluded from git — never commit your webhook URL.
+
 ### Database Structure
 
 Table `sessions`:
@@ -96,6 +103,7 @@ Table `sessions`:
 - `end_time` - Session end time
 - `duration_seconds` - Duration in seconds
 - `is_idle` - Whether session ended due to idle
+- `synced` - Whether session was exported to n8n (0/1)
 
 ### Privacy
 
@@ -110,13 +118,36 @@ It stores **ONLY**:
 - Process name
 - Session start/end times
 
+## Phase 2 - Bash Script ✅
+
+`run_time_tracker.sh` activates the `.venv` virtual environment and starts the daemon. Use this for manual runs.
+
+## Phase 3 - Sync / Exporter ✅
+
+On every daemon start, `daemon/exporter.py`:
+- Queries all unsynced sessions from SQLite
+- Sends them as a JSON payload via HTTP POST to the configured n8n webhook
+- Marks sessions as `synced = 1` on successful response
+- Deletes records older than 3 days that have already been synced
+
+## Phase 4 - n8n Storage ✅
+
+n8n flow receives the session payload and stores each session as a row in the built-in **Data Tables** (`dev_activity_daemon`). Flow structure:
+```
+Webhook → Split Out (sessions array) → Insert Row (Data Tables)
+```
+
+## Phase 5 - Autostart on Login ✅
+
+The daemon runs automatically on user login via a systemd user service. See installation instructions above.
+
 ## Roadmap
 
-### Phase 2 (planned)
-- Data export to JSON
-- Integration with n8n (HTTP POST)
-- Weekly aggregation
+### Phase 6 - Weekly HTML Report (planned)
+- Python Code node in n8n aggregates last 7 days of sessions
+- Charts via Quickchart.io: time per category, daily activity, top apps, idle ratio, productivity heatmap
+- HTML email sent via Gmail node every Monday at 8:00
 
-### Phase 3 (planned)
-- HTML report generation
-- Email sending via n8n
+### Phase 7 - Windows Support (planned)
+- Replace `daemon/window.py` and `daemon/idle.py` with `pywin32` equivalents
+- All other modules (DB, categorizer, exporter) remain unchanged
