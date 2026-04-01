@@ -209,3 +209,5 @@ __marimo__/
 
 # Dev-tracker specific
 dev_tracker.db
+
+config/config.yaml

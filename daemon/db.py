@@ -48,6 +48,15 @@ class Database:
             ON sessions(category)
         ''')
         
+        # Add synced column if it doesn't exist (for existing databases)
+        try:
+            cursor.execute('''
+                ALTER TABLE sessions ADD COLUMN synced INTEGER DEFAULT 0
+            ''')
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
+        
         self.conn.commit()
     
     def start_session(self, window_title: str, process_name: str, 
@@ -107,6 +116,56 @@ class Database:
         ''')
         
         return cursor.fetchone()
+    
+    def get_unsynced_sessions(self) -> list[sqlite3.Row]:
+        """
+        Get all unsynced sessions that have ended.
+        
+        Returns:
+            list[sqlite3.Row]: List of unsynced session rows
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM sessions 
+            WHERE synced = 0 AND end_time IS NOT NULL
+            ORDER BY start_time ASC
+        ''')
+        
+        return cursor.fetchall()
+    
+    def mark_synced(self, ids: list[int]):
+        """
+        Mark sessions as synced.
+        
+        Args:
+            ids: List of session IDs to mark as synced
+        """
+        if not ids:
+            return
+        
+        cursor = self.conn.cursor()
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f'''
+            UPDATE sessions 
+            SET synced = 1 
+            WHERE id IN ({placeholders})
+        ''', ids)
+        
+        self.conn.commit()
+    
+    def delete_old_synced(self):
+        """
+        Delete synced sessions older than 3 days.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            DELETE FROM sessions 
+            WHERE synced = 1 
+            AND end_time IS NOT NULL
+            AND julianday('now') - julianday(end_time) > 3
+        ''')
+        
+        self.conn.commit()
     
     def close(self):
         """Close database connection."""
