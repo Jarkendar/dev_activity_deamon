@@ -1,0 +1,635 @@
+{
+  "name": "dev_activity_reporter",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "61EXjt0nLCKmZ7ON",
+          "mode": "list",
+          "cachedResultName": "dev_activity_daemon",
+          "cachedResultUrl": "/projects/57QGut0RrnCgx05p/datatables/61EXjt0nLCKmZ7ON"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "start_time",
+              "condition": "gt",
+              "keyValue": "={{ $now.minus({days: 7}) }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        464
+      ],
+      "id": "9d47f96e-fb80-4160-adb8-79212f7ddba7",
+      "name": "Weekly getter"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtHour": 22
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        464
+      ],
+      "id": "90ac5615-e02d-44fb-b1ba-89095d1d3062",
+      "name": "Weekly trigger"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        704
+      ],
+      "id": "23b00db0-340b-43b5-ad60-a8c8c3d8444c",
+      "name": "Monthly trigger"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "61EXjt0nLCKmZ7ON",
+          "mode": "list",
+          "cachedResultName": "dev_activity_daemon",
+          "cachedResultUrl": "/projects/57QGut0RrnCgx05p/datatables/61EXjt0nLCKmZ7ON"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "start_time",
+              "condition": "lt",
+              "keyValue": "={{ $now.startOf('month') }}"
+            },
+            {
+              "keyName": "start_time",
+              "condition": "gt",
+              "keyValue": "={{ $now.minus({months: 1}).startOf('month') }}"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        160,
+        704
+      ],
+      "id": "aaf33ad7-4b4b-49e1-b57a-47163c63bfdf",
+      "name": "Monthly getter"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "from datetime import datetime, timezone\nimport pandas as pd\n\n# --- Receive rows from Data Tables node ---\nrows = [item['json'] for item in _items]\ndf = pd.DataFrame(rows)\n\n# --- Parse and clean ---\ndf[\"start_time\"] = pd.to_datetime(df[\"start_time\"], utc=True)\ndf[\"end_time\"] = pd.to_datetime(df[\"end_time\"], utc=True)\ndf[\"duration_seconds\"] = pd.to_numeric(df[\"duration_seconds\"], errors=\"coerce\").fillna(0)\ndf[\"is_idle\"] = df[\"is_idle\"].astype(bool)\ndf[\"category\"] = df[\"category\"].fillna(\"Uncategorized\")\n\n# --- Split active vs idle ---\ndf_active = df[df[\"is_idle\"] == False].copy()\ndf_idle = df[df[\"is_idle\"] == True].copy()\n\ntotal_active = int(df_active[\"duration_seconds\"].sum())\ntotal_idle = int(df_idle[\"duration_seconds\"].sum())\n\n# --- 1. Time per category ---\nby_category = (\n    df_active.groupby(\"category\")[\"duration_seconds\"]\n    .sum()\n    .sort_values(ascending=False)\n    .astype(int)\n    .to_dict()\n)\n\n# --- 2. Daily activity ---\ndf_active[\"day\"] = df_active[\"start_time\"].dt.strftime(\"%a %d.%m\")\nby_day = (\n    df_active.groupby(\"day\")[\"duration_seconds\"]\n    .sum()\n    .astype(int)\n    .to_dict()\n)\n\n# --- 3. Top 10 apps + Others (for pie chart) ---\napp_totals = (\n    df_active.groupby(\"window_title\")[\"duration_seconds\"]\n    .sum()\n    .sort_values(ascending=False)\n)\ntop_10 = app_totals.head(10).astype(int).to_dict()\nothers_sum = int(app_totals.iloc[10:].sum())\nif others_sum > 0:\n    top_10[\"Others\"] = others_sum\ntop_apps_pie = top_10\n\n# --- 4. Heatmap: weekday vs hour ---\ndf_active[\"hour\"] = df_active[\"start_time\"].dt.hour\ndf_active[\"weekday\"] = df_active[\"start_time\"].dt.strftime(\"%a\")\nheatmap = (\n    df_active.groupby([\"weekday\", \"hour\"])[\"duration_seconds\"]\n    .sum()\n    .reset_index()\n    .rename(columns={\"duration_seconds\": \"seconds\"})\n    .astype({\"seconds\": int})\n    .to_dict(orient=\"records\")\n)\n\n# --- 5. Stacked bar: category time per day ---\nWEEKDAY_ORDER = [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"]\ndf_active[\"weekday_short\"] = df_active[\"start_time\"].dt.strftime(\"%a\")\nstacked = (\n    df_active.groupby([\"weekday_short\", \"category\"])[\"duration_seconds\"]\n    .sum()\n    .reset_index()\n)\n# Build dict: {category: {day: hours}}\nall_categories = stacked[\"category\"].unique().tolist()\nstacked_by_category = {}\nfor cat in all_categories:\n    cat_df = stacked[stacked[\"category\"] == cat]\n    day_dict = dict(zip(cat_df[\"weekday_short\"], cat_df[\"duration_seconds\"] / 3600))\n    stacked_by_category[cat] = {\n        day: round(day_dict.get(day, 0.0), 2)\n        for day in WEEKDAY_ORDER\n    }\n\nreturn [{\n    \"json\": {\n        \"total_active_seconds\": total_active,\n        \"total_idle_seconds\": total_idle,\n        \"by_category\": by_category,\n        \"by_day\": by_day,\n        \"top_apps_pie\": top_apps_pie,\n        \"stacked_by_category\": stacked_by_category,\n        \"heatmap\": heatmap,\n        \"weekday_order\": WEEKDAY_ORDER,\n        \"all_categories\": all_categories,\n    }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        464
+      ],
+      "id": "fe4c6bd3-c465-44ed-9f14-3db236fe049b",
+      "name": "Week analysis"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import json\nimport urllib.parse\nimport urllib.request\n\ndata = _items[0]['json']\n\nCOLORS = [\n    '#4C9BE8', '#E87B4C', '#4CE87B', '#E84C9B',\n    '#9B4CE8', '#E8E84C', '#4CE8E8', '#E84C4C',\n    '#9BE84C', '#4C4CE8', '#888888'\n]\n\nBASE_URL = \"https://quickchart.io/chart?w=600&h=300&bkg=%231a1a2e&c=\"\n\ndef make_short_url(config):\n    payload = json.dumps({\"chart\": config, \"width\": 600, \"height\": 300, \"backgroundColor\": \"#1a1a2e\"}).encode('utf-8')\n    req = urllib.request.Request(\n        \"https://quickchart.io/chart/create\",\n        data=payload,\n        headers={\"Content-Type\": \"application/json\"},\n        method=\"POST\"\n    )\n    with urllib.request.urlopen(req, timeout=10) as resp:\n        result = json.loads(resp.read().decode())\n        return result[\"url\"]\n\ndef make_url(config):\n    encoded = urllib.parse.quote(json.dumps(config))\n    return BASE_URL + encoded\n\n# --- Chart 1: Time per category (horizontal bar) ---\ncats = list(data['by_category'].keys())\nvals = [round(v / 3600, 2) for v in data['by_category'].values()]\n\nchart_category = make_short_url({\n    \"type\": \"horizontalBar\",\n    \"data\": {\n        \"labels\": cats,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": vals,\n            \"backgroundColor\": COLORS[:len(cats)]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 2: Daily activity bar ---\ndays = data['weekday_order']\nby_day_short = {}\nfor k, v in data['by_day'].items():\n    short = k.split(' ')[0]\n    by_day_short[short] = by_day_short.get(short, 0) + v\nday_vals = [round(by_day_short.get(d, 0) / 3600, 2) for d in days]\n\nchart_daily = make_url({\n    \"type\": \"bar\",\n    \"data\": {\n        \"labels\": days,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": day_vals,\n            \"backgroundColor\": \"#4C9BE8\"\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 3: Top apps pie ---\napp_labels = list(data['top_apps_pie'].keys())\napp_vals = list(data['top_apps_pie'].values())\nshort_labels = [l[:35] + '...' if len(l) > 35 else l for l in app_labels]\n\nchart_top_apps = make_url({\n    \"type\": \"pie\",\n    \"data\": {\n        \"labels\": short_labels,\n        \"datasets\": [{\n            \"data\": app_vals,\n            \"backgroundColor\": COLORS[:len(app_vals)]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\n            \"position\": \"right\",\n            \"labels\": {\"fontColor\": \"white\", \"fontSize\": 10}\n        }\n    }\n})\n\n# --- Chart 4: Stacked bar category per day ---\ncategories = data['all_categories']\ndatasets = []\nfor i, cat in enumerate(categories):\n    cat_vals = [round(data['stacked_by_category'].get(cat, {}).get(d, 0), 2) for d in days]\n    datasets.append({\n        \"label\": cat,\n        \"data\": cat_vals,\n        \"backgroundColor\": COLORS[i % len(COLORS)]\n    })\n\nchart_stacked = make_url({\n    \"type\": \"bar\",\n    \"data\": {\n        \"labels\": days,\n        \"datasets\": datasets\n    },\n    \"options\": {\n        \"scales\": {\n            \"xAxes\": [{\"stacked\": True, \"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"stacked\": True, \"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        },\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}}\n    }\n})\n\n# --- Chart 5: Active vs Idle doughnut ---\nactive_h = round(data['total_active_seconds'] / 3600, 2)\nidle_h = round(data['total_idle_seconds'] / 3600, 2)\nif active_h == 0 and idle_h == 0:\n    idle_h = 0.01\n\nchart_idle = make_url({\n    \"type\": \"doughnut\",\n    \"data\": {\n        \"labels\": [f\"Active {active_h}h\", f\"Idle {idle_h}h\"],\n        \"datasets\": [{\n            \"data\": [active_h, idle_h],\n            \"backgroundColor\": [\"#4C9BE8\", \"#E84C4C\"]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\n            \"position\": \"bottom\",\n            \"labels\": {\"fontColor\": \"white\"}\n        }\n    }\n})\n\n# --- Chart 6: Heatmap (bubble chart) ---\nheatmap_data = []\nfor entry in data['heatmap']:\n    if entry['weekday'] in days:\n        heatmap_data.append({\n            \"x\": entry['hour'],\n            \"y\": days.index(entry['weekday']),\n            \"r\": min(20, max(3, int(entry['seconds'] / 60)))\n        })\n\nchart_heatmap = make_short_url({\n    \"type\": \"bubble\",\n    \"data\": {\n        \"datasets\": [{\n            \"label\": \"Activity\",\n            \"data\": heatmap_data,\n            \"backgroundColor\": \"#4C9BE8\"\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\n                \"ticks\": {\"fontColor\": \"white\", \"min\": 0, \"max\": 23, \"stepSize\": 1},\n                \"gridLines\": {\"color\": \"#333\"},\n                \"scaleLabel\": {\"display\": True, \"labelString\": \"Hour of day\", \"fontColor\": \"white\"}\n            }],\n            \"yAxes\": [{\n                \"ticks\": {\n                    \"fontColor\": \"white\",\n                    \"min\": 0,\n                    \"max\": 6,\n                    \"stepSize\": 1\n                },\n                \"gridLines\": {\"color\": \"#333\"},\n                \"scaleLabel\": {\"display\": True, \"labelString\": \"Day\", \"fontColor\": \"white\"}\n            }]\n        }\n    }\n})\nreturn [{'json': {\n    'chart_category': chart_category,\n    'chart_daily': chart_daily,\n    'chart_top_apps': chart_top_apps,\n    'chart_stacked': chart_stacked,\n    'chart_idle': chart_idle,\n    'chart_heatmap': chart_heatmap,\n    'total_active_seconds': data['total_active_seconds'],\n    'total_idle_seconds': data['total_idle_seconds'],\n    'by_category': data['by_category'],\n    'weekday_order': data['weekday_order'],\n    'all_categories': data['all_categories'],\n}}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        464
+      ],
+      "id": "dc37ee95-9825-4173-ae99-9d33e460f2a6",
+      "name": "Graphs creator"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "data = _items[0]['json']\n\ndef seconds_to_hm(s):\n    h = int(s // 3600)\n    m = int((s % 3600) // 60)\n    return f\"{h}h {m}m\"\n\ntotal_active = seconds_to_hm(data['total_active_seconds'])\ntotal_idle = seconds_to_hm(data['total_idle_seconds'])\n\ncategory_rows = \"\"\nfor cat, secs in data['by_category'].items():\n    category_rows += f\"<tr><td style='padding:6px 12px;color:#ccc;'>{cat}</td><td style='padding:6px 12px;color:#4C9BE8;font-weight:bold;'>{seconds_to_hm(secs)}</td></tr>\"\n\nhtml = f\"\"\"\n<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body {{ font-family: Arial, sans-serif; background: #0f0f1a; color: #ffffff; margin: 0; padding: 0; }}\n  .container {{ max-width: 800px; margin: 0 auto; padding: 30px 20px; }}\n  .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 12px; padding: 30px; margin-bottom: 30px; text-align: center; border: 1px solid #4C9BE8; }}\n  .header h1 {{ margin: 0; font-size: 28px; color: #4C9BE8; }}\n  .header p {{ margin: 8px 0 0; color: #aaa; font-size: 14px; }}\n  .stats {{ width: 100%; margin-bottom: 30px; }}\n  .stat-box {{ display: inline-block; width: 30%; background: #1a1a2e; border-radius: 10px; padding: 20px; text-align: center; border: 1px solid #333; vertical-align: top; }}\n  .stat-box .value {{ font-size: 26px; font-weight: bold; color: #4C9BE8; }}\n  .stat-box .label {{ font-size: 12px; color: #888; margin-top: 5px; }}\n  .section {{ background: #1a1a2e; border-radius: 10px; padding: 20px; margin-bottom: 25px; border: 1px solid #333; }}\n  .section h2 {{ margin: 0 0 15px; font-size: 16px; color: #4C9BE8; border-bottom: 1px solid #333; padding-bottom: 10px; }}\n  .chart img {{ width: 100% !important; max-width: 100% !important; height: auto !important; border-radius: 8px; display: block; }}\n  table {{ width: 100%; border-collapse: collapse; }}\n  tr:nth-child(even) {{ background: #16213e; }}\n  .footer {{ text-align: center; color: #555; font-size: 11px; margin-top: 30px; }}\n</style>\n</head>\n<body>\n<div class=\"container\">\n\n  <div class=\"header\">\n    <h1>Dev Activity Report</h1>\n    <p>Weekly summary — last 7 days</p>\n  </div>\n\n  <div class=\"stats\">\n    <div class=\"stat-box\">\n      <div class=\"value\">{total_active}</div>\n      <div class=\"label\">Active Time</div>\n    </div>\n    <div class=\"stat-box\">\n      <div class=\"value\">{total_idle}</div>\n      <div class=\"label\">Idle Time</div>\n    </div>\n    <div class=\"stat-box\">\n      <div class=\"value\">{len(data['by_category'])}</div>\n      <div class=\"label\">Categories</div>\n    </div>\n  </div>\n\n  <div class=\"section\">\n    <h2>Time per Category</h2>\n    <table>{category_rows}</table>\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Category Breakdown</h2>\n    <img width=\"700\" src=\"{data['chart_category']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Daily Activity</h2>\n    <img width=\"700\" src=\"{data['chart_daily']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Category per Day</h2>\n    <img width=\"700\" src=\"{data['chart_stacked']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Top Apps</h2>\n    <img width=\"700\" src=\"{data['chart_top_apps']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Active vs Idle</h2>\n    <img width=\"700\" src=\"{data['chart_idle']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Productivity Heatmap</h2>\n    <img width=\"700\" src=\"{data['chart_heatmap']}\">\n  </div>\n\n  <div class=\"footer\">\n    Generated by Dev-Tracker · Privacy-first activity monitoring\n  </div>\n\n</div>\n</body>\n</html>\n\"\"\"\n\nreturn [{'json': {'subject': 'Dev Activity — Weekly Report', 'html': html}}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        464
+      ],
+      "id": "fb4969d7-430e-46ea-bf65-cd14f6130dc7",
+      "name": "Format to HTML"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "f1d6349f-ed13-4960-8809-2451b41d888b",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -48,
+        224
+      ],
+      "id": "985a2bad-ca2f-42f4-8dce-73b682423e28",
+      "name": "Data listener",
+      "webhookId": "f1d6349f-ed13-4960-8809-2451b41d888b"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.sessions",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        160,
+        224
+      ],
+      "id": "3f778f55-f112-4edc-827a-df04937554c1",
+      "name": "Split data to rows"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  item.json.start_time = item.json.start_time.replace(' ', 'T');\n  item.json.end_time = item.json.end_time.replace(' ', 'T');\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        224
+      ],
+      "id": "d33a4a32-e9a6-4bd3-80da-ebffecc9ab12",
+      "name": "Change date time"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "61EXjt0nLCKmZ7ON",
+          "mode": "list",
+          "cachedResultName": "dev_activity_daemon",
+          "cachedResultUrl": "/projects/57QGut0RrnCgx05p/datatables/61EXjt0nLCKmZ7ON"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "is_idle": "={{ $json.is_idle }}",
+            "session_id": "={{ $json.id }}",
+            "window_title": "={{ $json.window_title }}",
+            "process_name": "={{ $json.process_name }}",
+            "category": "={{ $json.category }}",
+            "start_time": "={{ $json.start_time }}",
+            "end_time": "={{ $json.end_time }}",
+            "duration_seconds": "={{ $json.duration_seconds }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "window_title",
+              "displayName": "window_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "process_name",
+              "displayName": "process_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_time",
+              "displayName": "start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "end_time",
+              "displayName": "end_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "duration_seconds",
+              "displayName": "duration_seconds",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "is_idle",
+              "displayName": "is_idle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        576,
+        224
+      ],
+      "id": "5de661c9-17a8-4676-b33c-5502f906bcc0",
+      "name": "Insert data rows to n8n table"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "from datetime import datetime, timezone\nimport pandas as pd\n\nrows = [item['json'] for item in _items]\ndf = pd.DataFrame(rows)\n\n# --- Parse and clean ---\ndf[\"start_time\"] = pd.to_datetime(df[\"start_time\"], utc=True)\ndf[\"end_time\"] = pd.to_datetime(df[\"end_time\"], utc=True)\ndf[\"duration_seconds\"] = pd.to_numeric(df[\"duration_seconds\"], errors=\"coerce\").fillna(0)\ndf[\"is_idle\"] = df[\"is_idle\"].astype(bool)\ndf[\"category\"] = df[\"category\"].fillna(\"Uncategorized\")\n\ndf_active = df[df[\"is_idle\"] == False].copy()\ndf_idle = df[df[\"is_idle\"] == True].copy()\n\ntotal_active = int(df_active[\"duration_seconds\"].sum())\ntotal_idle = int(df_idle[\"duration_seconds\"].sum())\n\n# --- 1. Time per category ---\nby_category = (\n    df_active.groupby(\"category\")[\"duration_seconds\"]\n    .sum()\n    .sort_values(ascending=False)\n    .astype(int)\n    .to_dict()\n)\n\n# --- 2. Top 10 apps + Others ---\napp_totals = (\n    df_active.groupby(\"window_title\")[\"duration_seconds\"]\n    .sum()\n    .sort_values(ascending=False)\n)\ntop_10 = app_totals.head(10).astype(int).to_dict()\nothers_sum = int(app_totals.iloc[10:].sum())\nif others_sum > 0:\n    top_10[\"Others\"] = others_sum\ntop_apps_pie = top_10\n\n# --- 3. Weekly breakdown ---\ndf_active[\"week\"] = df_active[\"start_time\"].dt.isocalendar().week.astype(int)\ndf_active[\"week_label\"] = df_active[\"start_time\"].dt.strftime(\"W%V %d.%m\")\n# Group by week number, use first date as label\nweek_labels = (\n    df_active.groupby(\"week\")[\"week_label\"]\n    .first()\n    .to_dict()\n)\nweekly_totals = (\n    df_active.groupby(\"week\")[\"duration_seconds\"]\n    .sum()\n    .astype(int)\n    .to_dict()\n)\nweekly_breakdown = {\n    week_labels[w]: round(weekly_totals[w] / 3600, 2)\n    for w in sorted(week_labels.keys())\n}\n\n# --- 4. Best day of week ---\nWEEKDAY_ORDER = [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"]\ndf_active[\"weekday\"] = df_active[\"start_time\"].dt.strftime(\"%a\")\nbest_day = (\n    df_active.groupby(\"weekday\")[\"duration_seconds\"]\n    .sum()\n    .reindex(WEEKDAY_ORDER, fill_value=0)\n    .astype(int)\n    .to_dict()\n)\n\n# --- 5. Hour of day distribution ---\ndf_active[\"hour\"] = df_active[\"start_time\"].dt.hour\nhour_dist = (\n    df_active.groupby(\"hour\")[\"duration_seconds\"]\n    .sum()\n    .reindex(range(24), fill_value=0)\n    .astype(int)\n    .to_dict()\n)\nhour_dist = {str(k): v for k, v in hour_dist.items()}\n\n# --- 6. Daily calendar heatmap ---\ndf_active[\"day\"] = df_active[\"start_time\"].dt.strftime(\"%Y-%m-%d\")\ndaily_totals = (\n    df_active.groupby(\"day\")[\"duration_seconds\"]\n    .sum()\n    .astype(int)\n    .to_dict()\n)\n\nreturn [{\n    \"json\": {\n        \"total_active_seconds\": total_active,\n        \"total_idle_seconds\": total_idle,\n        \"by_category\": by_category,\n        \"top_apps_pie\": top_apps_pie,\n        \"weekly_breakdown\": weekly_breakdown,\n        \"best_day\": best_day,\n        \"hour_dist\": hour_dist,\n        \"daily_totals\": daily_totals,\n        \"weekday_order\": WEEKDAY_ORDER,\n    }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        704
+      ],
+      "id": "46726cc2-06f6-4a6a-a9b0-5ff1e94a8029",
+      "name": "Month analysis"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "import json\nimport urllib.request\nimport urllib.parse\n\ndata = _items[0]['json']\n\nCOLORS = [\n    '#4C9BE8', '#E87B4C', '#4CE87B', '#E84C9B',\n    '#9B4CE8', '#E8E84C', '#4CE8E8', '#E84C4C',\n    '#9BE84C', '#4C4CE8', '#888888'\n]\n\ndef make_short_url(config):\n    payload = json.dumps({\n        \"chart\": config,\n        \"width\": 600,\n        \"height\": 300,\n        \"backgroundColor\": \"#1a1a2e\"\n    }).encode('utf-8')\n    req = urllib.request.Request(\n        \"https://quickchart.io/chart/create\",\n        data=payload,\n        headers={\"Content-Type\": \"application/json\"},\n        method=\"POST\"\n    )\n    with urllib.request.urlopen(req, timeout=10) as resp:\n        result = json.loads(resp.read().decode())\n        return result[\"url\"]\n\n# --- Chart 1: Time per category (horizontal bar) ---\ncats = list(data['by_category'].keys())\nvals = [round(v / 3600, 2) for v in data['by_category'].values()]\n\nchart_category = make_short_url({\n    \"type\": \"horizontalBar\",\n    \"data\": {\n        \"labels\": cats,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": vals,\n            \"backgroundColor\": COLORS[:len(cats)]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 2: Top apps pie ---\napp_labels = list(data['top_apps_pie'].keys())\napp_vals = list(data['top_apps_pie'].values())\nshort_labels = [l[:35] + '...' if len(l) > 35 else l for l in app_labels]\n\nchart_top_apps = make_short_url({\n    \"type\": \"pie\",\n    \"data\": {\n        \"labels\": short_labels,\n        \"datasets\": [{\n            \"data\": app_vals,\n            \"backgroundColor\": COLORS[:len(app_vals)]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\n            \"position\": \"right\",\n            \"labels\": {\"fontColor\": \"white\", \"fontSize\": 10}\n        }\n    }\n})\n\n# --- Chart 3: Active vs Idle doughnut ---\nactive_h = round(data['total_active_seconds'] / 3600, 2)\nidle_h = round(data['total_idle_seconds'] / 3600, 2)\nif active_h == 0 and idle_h == 0:\n    idle_h = 0.01\n\nchart_idle = make_short_url({\n    \"type\": \"doughnut\",\n    \"data\": {\n        \"labels\": [f\"Active {active_h}h\", f\"Idle {idle_h}h\"],\n        \"datasets\": [{\n            \"data\": [active_h, idle_h],\n            \"backgroundColor\": [\"#4C9BE8\", \"#E84C4C\"]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\n            \"position\": \"bottom\",\n            \"labels\": {\"fontColor\": \"white\"}\n        }\n    }\n})\n\n# --- Chart 4: Weekly breakdown bar ---\nweek_labels = list(data['weekly_breakdown'].keys())\nweek_vals = list(data['weekly_breakdown'].values())\n\nchart_weekly = make_short_url({\n    \"type\": \"bar\",\n    \"data\": {\n        \"labels\": week_labels,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": week_vals,\n            \"backgroundColor\": \"#4CE87B\"\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 5: Best day of week ---\ndays = data['weekday_order']\nday_vals = [round(data['best_day'].get(d, 0) / 3600, 2) for d in days]\n\nchart_best_day = make_short_url({\n    \"type\": \"bar\",\n    \"data\": {\n        \"labels\": days,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": day_vals,\n            \"backgroundColor\": COLORS[:len(days)]\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 6: Hour of day distribution ---\nhours = [str(h) for h in range(24)]\nhour_vals = [round(data['hour_dist'].get(str(h), 0) / 3600, 2) for h in range(24)]\n\nchart_hour = make_short_url({\n    \"type\": \"bar\",\n    \"data\": {\n        \"labels\": hours,\n        \"datasets\": [{\n            \"label\": \"Hours\",\n            \"data\": hour_vals,\n            \"backgroundColor\": \"#9B4CE8\"\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}],\n            \"yAxes\": [{\"ticks\": {\"fontColor\": \"white\"}, \"gridLines\": {\"color\": \"#333\"}}]\n        }\n    }\n})\n\n# --- Chart 7: Daily calendar heatmap (bubble) ---\ndaily_data = []\nsorted_days = sorted(data['daily_totals'].keys())\nfor i, day in enumerate(sorted_days):\n    secs = data['daily_totals'][day]\n    daily_data.append({\n        \"x\": i + 1,\n        \"y\": 0,\n        \"r\": min(20, max(3, int(secs / 60)))\n    })\n\nday_labels = [d[8:] + \".\" + d[5:7] for d in sorted_days]\n\nchart_calendar = make_short_url({\n    \"type\": \"bubble\",\n    \"data\": {\n        \"datasets\": [{\n            \"label\": \"Activity\",\n            \"data\": daily_data,\n            \"backgroundColor\": \"#4C9BE8\"\n        }]\n    },\n    \"options\": {\n        \"legend\": {\"labels\": {\"fontColor\": \"white\"}},\n        \"scales\": {\n            \"xAxes\": [{\n                \"ticks\": {\"fontColor\": \"white\", \"min\": 1, \"max\": len(sorted_days)},\n                \"gridLines\": {\"color\": \"#333\"},\n                \"scaleLabel\": {\"display\": True, \"labelString\": \"Day of month\", \"fontColor\": \"white\"}\n            }],\n            \"yAxes\": [{\n                \"ticks\": {\"fontColor\": \"white\", \"display\": False},\n                \"gridLines\": {\"color\": \"#333\"}\n            }]\n        }\n    }\n})\n\nreturn [{'json': {\n    'chart_category': chart_category,\n    'chart_top_apps': chart_top_apps,\n    'chart_idle': chart_idle,\n    'chart_weekly': chart_weekly,\n    'chart_best_day': chart_best_day,\n    'chart_hour': chart_hour,\n    'chart_calendar': chart_calendar,\n    'total_active_seconds': data['total_active_seconds'],\n    'total_idle_seconds': data['total_idle_seconds'],\n    'by_category': data['by_category'],\n    'weekday_order': data['weekday_order'],\n}}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        704
+      ],
+      "id": "dd35571d-3919-4202-b14f-c151622f86a8",
+      "name": "Month graphs creator"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "data = _items[0]['json']\n\ndef seconds_to_hm(s):\n    h = int(s // 3600)\n    m = int((s % 3600) // 60)\n    return f\"{h}h {m}m\"\n\ntotal_active = seconds_to_hm(data['total_active_seconds'])\ntotal_idle = seconds_to_hm(data['total_idle_seconds'])\n\ncategory_rows = \"\"\nfor cat, secs in data['by_category'].items():\n    category_rows += f\"<tr><td style='padding:6px 12px;color:#ccc;'>{cat}</td><td style='padding:6px 12px;color:#4C9BE8;font-weight:bold;'>{seconds_to_hm(secs)}</td></tr>\"\n\nhtml = f\"\"\"\n<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<style>\n  body {{ font-family: Arial, sans-serif; background: #0f0f1a; color: #ffffff; margin: 0; padding: 0; }}\n  .container {{ max-width: 800px; margin: 0 auto; padding: 30px 20px; }}\n  .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 12px; padding: 30px; margin-bottom: 30px; text-align: center; border: 1px solid #4CE87B; }}\n  .header h1 {{ margin: 0; font-size: 28px; color: #4CE87B; }}\n  .header p {{ margin: 8px 0 0; color: #aaa; font-size: 14px; }}\n  .stats {{ width: 100%; margin-bottom: 30px; }}\n  .stat-box {{ display: inline-block; width: 30%; background: #1a1a2e; border-radius: 10px; padding: 20px; text-align: center; border: 1px solid #333; vertical-align: top; }}\n  .stat-box .value {{ font-size: 26px; font-weight: bold; color: #4CE87B; }}\n  .stat-box .label {{ font-size: 12px; color: #888; margin-top: 5px; }}\n  .section {{ background: #1a1a2e; border-radius: 10px; padding: 20px; margin-bottom: 25px; border: 1px solid #333; }}\n  .section h2 {{ margin: 0 0 15px; font-size: 16px; color: #4CE87B; border-bottom: 1px solid #333; padding-bottom: 10px; }}\n  .chart img {{ width: 100% !important; max-width: 100% !important; height: auto !important; border-radius: 8px; display: block; }}\n  table {{ width: 100%; border-collapse: collapse; }}\n  tr:nth-child(even) {{ background: #16213e; }}\n  .footer {{ text-align: center; color: #555; font-size: 11px; margin-top: 30px; }}\n</style>\n</head>\n<body>\n<div class=\"container\">\n\n  <div class=\"header\">\n    <h1>Dev Activity — Monthly Report</h1>\n    <p>Full month summary</p>\n  </div>\n\n  <div class=\"stats\">\n    <div class=\"stat-box\">\n      <div class=\"value\">{total_active}</div>\n      <div class=\"label\">Active Time</div>\n    </div>\n    <div class=\"stat-box\">\n      <div class=\"value\">{total_idle}</div>\n      <div class=\"label\">Idle Time</div>\n    </div>\n    <div class=\"stat-box\">\n      <div class=\"value\">{len(data['by_category'])}</div>\n      <div class=\"label\">Categories</div>\n    </div>\n  </div>\n\n  <div class=\"section\">\n    <h2>Time per Category</h2>\n    <table>{category_rows}</table>\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Category Breakdown</h2>\n    <img width=\"700\" src=\"{data['chart_category']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Weekly Breakdown</h2>\n    <img width=\"700\" src=\"{data['chart_weekly']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Best Day of Week</h2>\n    <img width=\"700\" src=\"{data['chart_best_day']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Peak Hours</h2>\n    <img width=\"700\" src=\"{data['chart_hour']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Top Apps</h2>\n    <img width=\"700\" src=\"{data['chart_top_apps']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Active vs Idle</h2>\n    <img width=\"700\" src=\"{data['chart_idle']}\">\n  </div>\n\n  <div class=\"section chart\">\n    <h2>Daily Activity Calendar</h2>\n    <img width=\"700\" src=\"{data['chart_calendar']}\">\n  </div>\n\n  <div class=\"footer\">\n    Generated by Dev-Tracker · Privacy-first activity monitoring\n  </div>\n\n</div>\n</body>\n</html>\n\"\"\"\n\nreturn [{'json': {'subject': 'Dev Activity — Monthly Report', 'html': html}}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        704
+      ],
+      "id": "380f096d-fe36-4585-b97a-5b575629f759",
+      "name": "Month to HTML"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.N8N_AGENT_EMAIL_FROM }}",
+        "toEmail": "={{ $env.DEV_ACTIVITY_DAEMON_EMAIL_TO }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        992,
+        464
+      ],
+      "id": "f1ce02fc-3a1b-4fef-b283-489a3b8211ef",
+      "name": "Send weekly report",
+      "webhookId": "9a0b927e-2691-4a1b-9447-943d5e4510d3",
+      "credentials": {
+        "smtp": {
+          "id": "24yqgL5wqdQHCmey",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.N8N_AGENT_EMAIL_FROM }}",
+        "toEmail": "={{ $env.DEV_ACTIVITY_DAEMON_EMAIL_TO }}",
+        "subject": "={{ $json.subject }}",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        992,
+        704
+      ],
+      "id": "ed6876bf-f22a-4470-bff8-4ae897dc5cda",
+      "name": "Send monthly report",
+      "webhookId": "9a0b927e-2691-4a1b-9447-943d5e4510d3",
+      "credentials": {
+        "smtp": {
+          "id": "24yqgL5wqdQHCmey",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Data collector",
+        "height": 208,
+        "width": 880
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        176
+      ],
+      "typeVersion": 1,
+      "id": "6010e37a-e3ff-498b-822b-2d455cfea2ef",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Weekly report",
+        "height": 208,
+        "width": 1296
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        416
+      ],
+      "typeVersion": 1,
+      "id": "ad6bb791-9b28-4afa-a9bb-33fb48d2586c",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Monthly report",
+        "height": 208,
+        "width": 1296
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        656
+      ],
+      "typeVersion": 1,
+      "id": "035d273b-e375-4ce6-bc22-46255f8e9642",
+      "name": "Sticky Note2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly trigger": {
+      "main": [
+        [
+          {
+            "node": "Weekly getter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly getter": {
+      "main": [
+        [
+          {
+            "node": "Week analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Week analysis": {
+      "main": [
+        [
+          {
+            "node": "Graphs creator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Graphs creator": {
+      "main": [
+        [
+          {
+            "node": "Format to HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format to HTML": {
+      "main": [
+        [
+          {
+            "node": "Send weekly report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly trigger": {
+      "main": [
+        [
+          {
+            "node": "Monthly getter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data listener": {
+      "main": [
+        [
+          {
+            "node": "Split data to rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split data to rows": {
+      "main": [
+        [
+          {
+            "node": "Change date time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change date time": {
+      "main": [
+        [
+          {
+            "node": "Insert data rows to n8n table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monthly getter": {
+      "main": [
+        [
+          {
+            "node": "Month analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Month analysis": {
+      "main": [
+        [
+          {
+            "node": "Month graphs creator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Month graphs creator": {
+      "main": [
+        [
+          {
+            "node": "Month to HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Month to HTML": {
+      "main": [
+        [
+          {
+            "node": "Send monthly report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c823de74-8a99-43a4-9ae0-66d0da9339dc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "97481b629537fec29dc17e37e9860b073024f9e9a612443256860c22d1358b72"
+  },
+  "id": "zRnQTWANCXVr2WvG",
+  "tags": [
+    {
+      "updatedAt": "2026-04-02T17:33:04.440Z",
+      "createdAt": "2026-04-02T17:33:04.440Z",
+      "id": "FQeOsmVLsgzoXLMD",
+      "name": "data table"
+    },
+    {
+      "updatedAt": "2026-03-12T07:14:31.968Z",
+      "createdAt": "2026-03-12T07:14:31.968Z",
+      "id": "LMI2wwmKQQRYls3c",
+      "name": "mail"
+    },
+    {
+      "updatedAt": "2026-04-02T17:32:50.941Z",
+      "createdAt": "2026-04-02T17:32:50.941Z",
+      "id": "m6g38sSfTF4up3Ao",
+      "name": "webhook"
+    },
+    {
+      "updatedAt": "2026-04-02T17:32:45.662Z",
+      "createdAt": "2026-04-02T17:32:45.662Z",
+      "id": "mq5yd5kT2zxvGvAc",
+      "name": "python"
+    }
+  ]
+}
