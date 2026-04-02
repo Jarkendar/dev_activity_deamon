@@ -14,11 +14,22 @@ A lightweight daemon for tracking developer activity with a focus on privacy.
 [SQLite local database]
          │
          ▼ (on daemon start — unsynced sessions via HTTP POST)
-[n8n flow]
+[n8n flow — Raspberry Pi]
     ├── Split sessions array
     ├── Insert into Data Tables (dev_activity_daemon)
-    └── Weekly HTML report → Gmail (planned)
+    ├── Weekly HTML report → Gmail (every Sunday 20:00)
+    └── Monthly HTML report → Gmail (1st of every month)
 ```
+
+## n8n Infrastructure
+
+All n8n flows, Docker setup and Raspberry Pi configuration live in a separate repository:
+
+**[Jarkendar/pi-automate](https://github.com/Jarkendar/pi-automate)**
+
+Exported flow definitions are available in the [`n8n/`](./n8n/) directory of this repository.
+
+---
 
 ## Phase 1 - Core Functionality ✅
 
@@ -118,6 +129,8 @@ It stores **ONLY**:
 - Process name
 - Session start/end times
 
+---
+
 ## Phase 2 - Bash Script ✅
 
 `run_time_tracker.sh` activates the `.venv` virtual environment and starts the daemon. Use this for manual runs.
@@ -141,12 +154,32 @@ Webhook → Split Out (sessions array) → Insert Row (Data Tables)
 
 The daemon runs automatically on user login via a systemd user service. See installation instructions above.
 
-## Roadmap
+## Phase 6 - Weekly & Monthly HTML Reports ✅
 
-### Phase 6 - Weekly HTML Report (planned)
-- Python Code node in n8n aggregates last 7 days of sessions
-- Charts via Quickchart.io: time per category, daily activity, top apps, idle ratio, productivity heatmap
-- HTML email sent via Gmail node every Monday at 8:00
+### Weekly report — every Sunday at 20:00
+Python Code nodes in n8n aggregate last 7 days of sessions and send an HTML email via Gmail with:
+- Time per category
+- Daily activity bar chart
+- Category time per day (stacked bar)
+- Top 10 apps (pie chart)
+- Active vs Idle ratio (doughnut)
+- Productivity heatmap (hour vs day)
+
+### Monthly report — 1st of every month at midnight
+Covers the full previous month with extended analysis:
+- Time per category
+- Weekly breakdown (week by week comparison)
+- Best day of week
+- Peak hours distribution
+- Top 10 apps (pie chart)
+- Active vs Idle ratio
+- Daily activity calendar
+
+Charts are generated via **[Quickchart.io](https://quickchart.io)**.
+
+---
+
+## Roadmap
 
 ### Phase 7 - Windows Support (planned)
 - Replace `daemon/window.py` and `daemon/idle.py` with `pywin32` equivalents
