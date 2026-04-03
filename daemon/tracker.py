@@ -1,8 +1,16 @@
 """Main activity tracker module."""
+import platform
 import time
 from typing import Optional
-from daemon.window import get_active_window
-from daemon.idle import IdleDetector
+
+# Import platform-specific modules
+if platform.system() == 'Windows':
+    from daemon.windows.window import get_active_window
+    from daemon.windows.idle import IdleDetector
+else:
+    from daemon.linux.window import get_active_window
+    from daemon.linux.idle import IdleDetector
+
 from daemon.db import Database
 from daemon.categorizer import Categorizer
 

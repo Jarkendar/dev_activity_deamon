@@ -1,1 +1,3 @@
 PyYAML>=6.0
+psutil>=5.9
+# pywin32>=306 - Windows only, must be installed manually on Windows
