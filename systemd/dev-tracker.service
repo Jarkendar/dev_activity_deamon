@@ -1,11 +1,13 @@
 [Unit]
 Description=Dev-Tracker Activity Monitor
-After=graphical-session.target
+After=graphical-session.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/dev-tracker
-ExecStart=%h/dev-tracker/.venv/bin/python -m daemon.main
+WorkingDirectory=/home/jarkendar/Pulpit/github/dev_activity_deamon
+ExecStartPre=/bin/sleep 10
+ExecStart=/home/jarkendar/Pulpit/github/dev_activity_deamon/.venv/bin/python -m daemon.main
 Restart=on-failure
 RestartSec=10
 
