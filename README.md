@@ -2,13 +2,13 @@
 
 A lightweight daemon for tracking developer activity with a focus on privacy.
 
-## Conceptual Architecture
+## Architecture
 ```
 [Python Daemon]
     │
     ├── Window title poller (every 5s)
     ├── Active process tracker
-    └── Idle detector (XScreenSaver API)
+    └── Idle detector (XScreenSaver / Windows API)
          │
          ▼
 [SQLite local database]
@@ -17,37 +17,48 @@ A lightweight daemon for tracking developer activity with a focus on privacy.
 [n8n flow — Raspberry Pi]
     ├── Split sessions array
     ├── Insert into Data Tables (dev_activity_daemon)
-    ├── Weekly HTML report → Gmail (every Sunday 20:00)
+    ├── Weekly HTML report → Gmail (every Sunday 22:00)
     └── Monthly HTML report → Gmail (1st of every month)
 ```
 
-## n8n Infrastructure
+## Features
 
-All n8n flows, Docker setup and Raspberry Pi configuration live in a separate repository:
+- Active window tracking (title + process name)
+- Idle detection (2 minutes of inactivity)
+- Automatic categorization based on regex rules
+- Session storage in SQLite
+- Polling every 5 seconds
+- Privacy-first: only window title and process name, never content
+- Auto-sync to n8n on every daemon start
+- Autostart on login via systemd
+- Cross-platform: Linux (X11) and Windows support
 
-**[Jarkendar/pi-automate](https://github.com/Jarkendar/pi-automate)**
+## Platform Support
 
-Exported flow definitions are available in the [`n8n/`](./n8n/) directory of this repository.
+| Feature | Linux | Windows |
+|---|---|---|
+| Window tracking | `xdotool` | `pywin32` |
+| Idle detection | XScreenSaver API | `ctypes.windll` |
+| Everything else | ✅ | ✅ |
 
----
+The correct platform module is selected automatically via `platform.system()`.
 
-## Phase 1 - Core Functionality ✅
+> **Note:** Windows support has not been tested. The implementation is based on the `pywin32` API and should work in theory, but may require adjustments.
 
-### Features
-- ✅ Active window tracking (title + process name)
-- ✅ Idle detection (2 minutes of inactivity)
-- ✅ Automatic categorization based on regex rules
-- ✅ Session storage in SQLite
-- ✅ Polling every 5 seconds
-- ✅ Privacy-first: only window title and process name, never content
+## Requirements
 
-### Requirements
+**Linux:**
 - Python 3.11+
-- Linux with X11
-- `xdotool` (for reading window information)
-- XScreenSaver (for idle detection)
+- X11
+- `xdotool` and `libxss-dev`
 
-### Installation
+**Windows:**
+- Python 3.11+
+- `pywin32>=306` (install manually)
+
+## Installation
+
+### Linux
 ```bash
 # Install system dependencies
 sudo apt-get install xdotool libxss-dev
@@ -56,16 +67,22 @@ sudo apt-get install xdotool libxss-dev
 pip install -r daemon/requirements.txt
 ```
 
-### Usage
+### Windows
+```bash
+pip install -r daemon/requirements.txt
+pip install pywin32
+```
 
-#### Manual start
+## Usage
+
+### Manual start
 ```bash
 ./run_time_tracker.sh
 
 # Stop: Ctrl+C
 ```
 
-#### Run as systemd service (recommended)
+### Autostart on login — systemd service (Linux, recommended)
 ```bash
 # Copy the service file to the user directory
 mkdir -p ~/.config/systemd/user
@@ -90,9 +107,9 @@ systemctl --user stop dev-tracker
 systemctl --user disable dev-tracker
 ```
 
-**Note:** Make sure the path in `systemd/dev-tracker.service` points to the correct project location (default `~/dev-tracker`). If the project is located elsewhere, edit `WorkingDirectory` and `ExecStart` in the service file.
+**Note:** Make sure the path in `systemd/dev-tracker.service` points to the correct project location. Edit `WorkingDirectory` and `ExecStart` in the service file if needed.
 
-### Configuration
+## Configuration
 
 Edit `config/categories.yaml` to customize categorization rules.
 
@@ -103,61 +120,26 @@ n8n_webhook_url: "https://your-n8n-instance/webhook/..."
 
 > `config/config.yaml` is excluded from git — never commit your webhook URL.
 
-### Database Structure
+## Data Sync
 
-Table `sessions`:
-- `id` - Session ID
-- `window_title` - Window title
-- `process_name` - Process name
-- `category` - Category (from regex rules)
-- `start_time` - Session start time
-- `end_time` - Session end time
-- `duration_seconds` - Duration in seconds
-- `is_idle` - Whether session ended due to idle
-- `synced` - Whether session was exported to n8n (0/1)
-
-### Privacy
-
-Dev-tracker does **NOT** store:
-- Window contents
-- Keystrokes
-- Screenshots
-- Personal data
-
-It stores **ONLY**:
-- Window title
-- Process name
-- Session start/end times
-
----
-
-## Phase 2 - Bash Script ✅
-
-`run_time_tracker.sh` activates the `.venv` virtual environment and starts the daemon. Use this for manual runs.
-
-## Phase 3 - Sync / Exporter ✅
-
-On every daemon start, `daemon/exporter.py`:
+On every daemon start, `daemon/exporter.py` automatically:
 - Queries all unsynced sessions from SQLite
 - Sends them as a JSON payload via HTTP POST to the configured n8n webhook
 - Marks sessions as `synced = 1` on successful response
 - Deletes records older than 3 days that have already been synced
 
-## Phase 4 - n8n Storage ✅
+If the network is unavailable at startup, the sync is skipped silently and retried on the next start.
 
-n8n flow receives the session payload and stores each session as a row in the built-in **Data Tables** (`dev_activity_daemon`). Flow structure:
-```
-Webhook → Split Out (sessions array) → Insert Row (Data Tables)
-```
+## n8n Reports
 
-## Phase 5 - Autostart on Login ✅
+All n8n flows, Docker setup and Raspberry Pi configuration live in a separate repository:
 
-The daemon runs automatically on user login via a systemd user service. See installation instructions above.
+**[Jarkendar/pi-automate](https://github.com/Jarkendar/pi-automate)**
 
-## Phase 6 - Weekly & Monthly HTML Reports ✅
+Exported flow definitions are available in the [`n8n/`](./n8n/) directory.
 
-### Weekly report — every Sunday at 20:00
-Python Code nodes in n8n aggregate last 7 days of sessions and send an HTML email via Gmail with:
+### Weekly report — every Sunday at 22:00
+Aggregates last 7 days of sessions and sends an HTML email with:
 - Time per category
 - Daily activity bar chart
 - Category time per day (stacked bar)
@@ -177,10 +159,44 @@ Covers the full previous month with extended analysis:
 
 Charts are generated via **[Quickchart.io](https://quickchart.io)**.
 
+## Database Structure
+
+Table `sessions`:
+- `id` - Session ID
+- `window_title` - Window title
+- `process_name` - Process name
+- `category` - Category (from regex rules)
+- `start_time` - Session start time
+- `end_time` - Session end time
+- `duration_seconds` - Duration in seconds
+- `is_idle` - Whether session ended due to idle
+- `synced` - Whether session was exported to n8n (0/1)
+
+## Privacy
+
+Dev-tracker does **NOT** store:
+- Window contents
+- Keystrokes
+- Screenshots
+- Personal data
+
+It stores **ONLY**:
+- Window title
+- Process name
+- Session start/end times
+
 ---
 
-## Roadmap
+## Development History
 
-### Phase 7 - Windows Support (planned)
-- Replace `daemon/window.py` and `daemon/idle.py` with `pywin32` equivalents
-- All other modules (DB, categorizer, exporter) remain unchanged
+The project was built incrementally in 7 phases:
+
+| Phase | Description |
+|---|---|
+| 1 | Core daemon — window tracking, idle detection, SQLite |
+| 2 | Bash startup script with venv activation |
+| 3 | Sync / Exporter — HTTP POST to n8n on every start |
+| 4 | n8n Data Tables storage |
+| 5 | Autostart on login via systemd user service |
+| 6 | Weekly and monthly HTML reports via n8n + Gmail |
+| 7 | Windows support — platform-specific modules in `linux/` and `windows/` subdirectories |
