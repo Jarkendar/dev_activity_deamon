@@ -2,41 +2,80 @@
 # Each category contains a list of regex patterns to match
 
 categories:
-  - name: "Development"
+  # --- IDEs & Code Editors ---
+  - name: "IDE"
     patterns:
       - field: "process_name"
-        regex: "^(code|vim|nvim|emacs|sublime|atom|pycharm|idea|eclipse)$"
+        regex: "^(code|code-insiders|codium|vscodium|idea|idea64|pycharm|pycharm64|webstorm|webstorm64|clion|clion64|rider|rider64|goland|goland64|phpstorm|phpstorm64|datagrip|datagrip64|studio64|studio|androidstudio|vim|nvim|emacs|sublime|atom|eclipse|cursor|zed)$"
       - field: "window_title"
-        regex: "\\.(py|js|java|cpp|c|go|rs|rb|php|html|css)\\b"
-  
+        regex: "(Android Studio|IntelliJ IDEA|PyCharm|WebStorm|CLion|Rider|GoLand|PhpStorm|DataGrip|Visual Studio Code|VSCodium)"
+      - field: "window_title"
+        regex: "\\.(py|js|ts|java|kt|cpp|c|go|rs|rb|php|html|css|xml|json|yaml|yml|sh|toml|gradle|swift)\\b"
+
+  # --- Terminal & Shell ---
   - name: "Terminal"
     patterns:
       - field: "process_name"
-        regex: "^(gnome-terminal|konsole|xterm|alacritty|kitty|terminator)$"
-  
-  - name: "Browser"
+        regex: "^(gnome-terminal|konsole|xterm|alacritty|kitty|terminator|wezterm|tilix|bash|zsh|fish)$"
+
+  # --- AI - Claude (before generic AI and Browser) ---
+  - name: "AI - Claude"
+    patterns:
+      - field: "window_title"
+        regex: "(claude\\.ai|anthropic\\.com)"
+
+  # --- AI - Other LLMs ---
+  - name: "AI"
+    patterns:
+      - field: "window_title"
+        regex: "(chatgpt\\.com|chat\\.openai\\.com|gemini\\.google|copilot\\.microsoft|perplexity\\.ai|grok\\.x\\.ai|mistral\\.ai|Open WebUI|LM Studio)"
+
+  # --- Version Control & DevOps ---
+  - name: "Git & DevOps"
     patterns:
       - field: "process_name"
-        regex: "^(firefox|chrome|chromium|brave|opera|vivaldi)$"
-  
+        regex: "^(gitkraken|sourcetree|github-desktop|lazygit)$"
+      - field: "window_title"
+        regex: "(GitHub|GitLab|Bitbucket|Pull Request|Merge Request|GitHub Actions|Jenkins|CircleCI)"
+
+  # --- Documentation ---
   - name: "Documentation"
     patterns:
       - field: "window_title"
-        regex: "(documentation|docs|manual|wiki|stackoverflow|github)"
-  
+        regex: "(developer\\.android\\.com|kotlinlang\\.org|stackoverflow\\.com|/docs/|DevDocs|Dash|Zeal)"
+
+  # --- Browser (catch-all, after more specific rules) ---
+  - name: "Browser"
+    patterns:
+      - field: "process_name"
+        regex: "^(firefox|chrome|chromium|brave|opera|vivaldi|microsoft-edge|edge)$"
+
+  # --- Communication ---
   - name: "Communication"
     patterns:
       - field: "process_name"
-        regex: "^(slack|discord|teams|telegram|signal|thunderbird)$"
-  
+        regex: "^(slack|discord|teams|telegram|signal|thunderbird|zoom|skype)$"
+      - field: "window_title"
+        regex: "(Slack|Discord|Microsoft Teams|Telegram|Gmail|WhatsApp Web)"
+
+  # --- Multimedia ---
   - name: "Multimedia"
     patterns:
       - field: "process_name"
-        regex: "^(vlc|mpv|spotify|rhythmbox|audacity)$"
-  
+        regex: "^(vlc|mpv|spotify|rhythmbox|audacity|obs|obs-studio|gimp|inkscape|blender)$"
+      - field: "window_title"
+        regex: "(YouTube|Twitch|Netflix|Spotify|VLC|OBS)"
+
+  # --- Office & Notes ---
   - name: "Office"
     patterns:
       - field: "process_name"
-        regex: "^(libreoffice|soffice|abiword|gnumeric|evince|okular)$"
+        regex: "^(libreoffice|soffice|abiword|gnumeric|evince|okular|obsidian|notion|logseq)$"
       - field: "window_title"
-        regex: "\\.(doc|docx|xls|xlsx|ppt|pptx|pdf)\\b"
+        regex: "\\.(doc|docx|xls|xlsx|ppt|pptx|pdf)\\b|(Obsidian|Notion|Logseq)"
+
+  # --- System ---
+  - name: "System"
+    patterns:
+      - field: "process_name"
+        regex: "^(nautilus|thunar|dolphin|nemo|gnome-system-monitor|htop|btop|gnome-control-center)$"
